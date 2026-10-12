@@ -1,0 +1,114 @@
+name: build-and-publish
+
+on:
+  schedule:
+    - cron: "0 2 * * 0" # Sundays 02:00 UTC
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [Dockerfile, .github/workflows/**]
+  pull_request:
+    paths: [Dockerfile, .github/workflows/**]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # keyless cosign signing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (local, for tests and scan)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          pull: true
+          no-cache: ${{ github.event_name == 'schedule' }}
+          tags: toolbox:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          docker run --rm toolbox:scan bash -euxc '
+            [ "$(id -u)" != 0 ]
+            curl --version; jq --version; yq --version; git --version
+            kubectl version --client; helm version --short; terraform version; az version
+          '
+
+      - name: Vulnerability scan (fail on fixable HIGH/CRITICAL)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.cache/trivy:/root/.cache/" \
+            aquasec/trivy:latest image \
+            --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed toolbox:scan
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value={{date 'YYYY-MM-DD'}},enable={{is_default_branch}}
+            type=sha,enable={{is_default_branch}}
+
+      - name: Push
+        id: push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+
+      - uses: sigstore/cosign-installer@v3
+        if: github.event_name != 'pull_request'
+
+      - name: Sign image
+        if: github.event_name != 'pull_request'
+        run: cosign sign --yes "${IMAGE}@${{ steps.push.outputs.digest }}"
+
+  cleanup:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      # Each release is two tagged versions (image + cosign signature); keep 3 releases.
+      - uses: snok/container-retention-policy@v3.1.0
+        with:
+          account: user # use the org name if the repo belongs to an organization
+          token: ${{ secrets.GITHUB_TOKEN }}
+          image-names: toolbox
+          tag-selection: both
+          keep-n-most-recent: 6
+          cut-off: 1h
