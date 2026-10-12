@@ -39,6 +39,7 @@ RUN apk add --no-cache python3 python3-dev py3-pip gcc musl-dev libffi-dev opens
 RUN python3 -m venv /opt/az \
     && /opt/az/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/az/bin/pip install --no-cache-dir "azure-cli${AZURE_CLI_VERSION:+==${AZURE_CLI_VERSION}}" \
+    && /opt/az/bin/pip uninstall -y pip \
     && find /opt/az -type d -name __pycache__ -prune -exec rm -rf {} +
 
 # ---- Stage 3: final image ----
