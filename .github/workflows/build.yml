@@ -80,7 +80,7 @@ jobs:
           images: ${{ env.IMAGE }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value={{date 'YYYY-MM-DD'}},enable={{is_default_branch}}
+            type=raw,value={{date 'YYYYMMDD-HHmmss'}},enable={{is_default_branch}}
             type=sha,enable={{is_default_branch}}
 
       - name: Push

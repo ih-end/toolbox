@@ -15,7 +15,7 @@ docker run --rm -it -v "$PWD:/workspace" ghcr.io/ih-end/toolbox:latest
 kubectl run toolbox --rm -it --image=ghcr.io/ih-end/toolbox:latest -- bash
 ```
 
-Tags: `latest`, `YYYY-MM-DD`, `sha-<commit>`. Images are stored in GitHub Container Registry; only the last 3 releases are kept.
+Tags: `latest`, `YYYYMMDD-HHmmss` (unique per build), `sha-<commit>`. Images are stored in GitHub Container Registry; only the last 3 releases are kept.
 
 ## Security
 
